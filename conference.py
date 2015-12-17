@@ -125,7 +125,7 @@ class ConferenceApi(remote.Service):
         return cf
 
     def _copySessionToForm(self, sess):
-        """Copy relevant fields from Conference to ConferenceForm."""
+        """Copy relevant fields from Session to SessionForm."""
         sf = SessionForm()
         for field in sf.all_fields():
             if hasattr(sess, field.name):
@@ -202,14 +202,11 @@ class ConferenceApi(remote.Service):
         # check that conference exists
         if not conf:
             raise endpoints.NotFoundException(
-                'No conference found with key: %s' % cwf_key)
+                'No conference found with key: %s' % request.confwebsafeKey)
 
         # preload necessary items
         if not request.name:
             raise endpoints.BadRequestException("Session 'name' field required")
-
-        if not request.confwebsafeKey:
-            raise endpoints.BadRequestException("A Conference is required")
 
         # copy SessionForm/ProtoRPC Message into dict
         data = {field.name: getattr(request, field.name) for field in request.all_fields()}
@@ -240,17 +237,10 @@ class ConferenceApi(remote.Service):
         if data['startTime']:
             data['startTime'] = datetime.strptime(data['startTime'][:10], "%H:%M").time()
 
-        # generate Profile Key based on user ID and SessionForm
-        # ID based on Profile key get Session key from ID
-        #conf_key = ndb.Key(Conference, cwf_key)
-
         s_id = Session.allocate_ids(size=1, parent=conf.key)[0]
         c_key = ndb.Key(Session, s_id, parent=conf.key)
         data['key'] = c_key
         Session(**data).put()
-        print conf.key.urlsafe()
-        print data['speaker']
-        print '*****************************************************'
         taskqueue.add(params={'confwebsafeKey': conf.key.urlsafe(),
             'speaker': data['speaker']},
             url='/tasks/get_featured_speakers'
@@ -319,7 +309,7 @@ class ConferenceApi(remote.Service):
         return self._updateConferenceObject(request)
 
     @endpoints.method(SessionSpeakerForm, SessionForms, path='getspeaker',
-            http_method='POST', name='getSessionsBySpeaker')
+            http_method='GET', name='getSessionsBySpeaker')
     def getSessionsBySpeaker(self, request):
         """Get Sessions by Speaker"""
         q = Session.query()
@@ -330,10 +320,10 @@ class ConferenceApi(remote.Service):
         )
 
     @endpoints.method(SessionTypeForm, SessionForms, path='getType',
-            http_method='POST', name='getConferenceSessionsByType')
+            http_method='GET', name='getConferenceSessionsByType')
     def getConferenceSessionsByType(self, request):
         """Get Sessions by Type"""
-        q = Session.query()
+        q = Session.query(ancestor=ndb.Key(urlsafe=request.confwebsafeKey))
         sessions = q.filter(Session.typeOfSession == request.typeOfSession)
 
         return SessionForms(
@@ -375,7 +365,7 @@ class ConferenceApi(remote.Service):
 
 
     @endpoints.method(message_types.VoidMessage, SessionForms,
-            path='sessions/duration',
+            path='sessions/byLarry',
             http_method='GET', name='getHalfHourSessionsByLarry')
     def getHalfHourSessionsByLarry(self, request):
         """This query returns all sessions by Larry that are 30 minutes long"""
@@ -396,7 +386,7 @@ class ConferenceApi(remote.Service):
             path='sessions/latesessions',
             http_method='GET', name='getLateSessions')
     def getLateSessions(self, request):
-        """Given a duration, returns all sessions less than or greater than."""
+        """Returns all sessions after 4pm."""
         # create 
         q = Session.query()
 
@@ -414,8 +404,8 @@ class ConferenceApi(remote.Service):
         
     @endpoints.method(CONF_GET_REQUEST, SessionForms,
             path='sessions/{websafeConferenceKey}',
-            http_method='GET', name='getConferencesSessions')
-    def getConferencesSessions(self, request):
+            http_method='GET', name='getConferenceSessions')
+    def getConferenceSessions(self, request):
         """Given a conference, returns all sessions."""
         # create ancestor query for all key matches for this user
         sessions = Session.query(ancestor=ndb.Key(urlsafe=request.websafeConferenceKey))
@@ -636,7 +626,6 @@ class ConferenceApi(remote.Service):
         # get session; check that it exists
         wsck = request.sessionKey
         sess_key = ndb.Key(urlsafe=wsck)
-        print sess_key.id()
         sess = sess_key.get()
         if not sess:
             raise endpoints.NotFoundException(
@@ -766,9 +755,7 @@ class ConferenceApi(remote.Service):
 
     @staticmethod
     def _cacheFeaturedSpeakersAnnouncement(confwebsafeKey, featuredSpeaker):
-        """Create Announcement & assign to memcache; used by
-        memcache cron job & putAnnouncement().
-        """
+        """Create an Announcement for Featured Speakers and store it in memcache"""
         
         sessions = Session.query(ancestor=ndb.Key(urlsafe=confwebsafeKey))
 

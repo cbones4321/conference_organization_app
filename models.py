@@ -67,7 +67,8 @@ class SessionSpeakerForm(messages.Message):
     speaker         = messages.StringField(1)
 
 class SessionTypeForm(messages.Message):
-    typeOfSession   = messages.StringField(1)
+    confwebsafeKey  = messages.StringField(1)
+    typeOfSession   = messages.StringField(2)
 
 class ProfileMiniForm(messages.Message):
     """ProfileMiniForm -- update Profile form message"""
